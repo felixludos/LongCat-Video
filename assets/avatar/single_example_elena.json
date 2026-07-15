@@ -1,0 +1,7 @@
+{
+    "prompt": "A European professional woman wearing a business suit speaks confidently to the camera while standing in front of a green screen.",
+    "cond_image": "assets/avatar/single/elena.png",
+    "cond_audio": {
+        "person1": "assets/avatar/single/elena.wav"
+    }
+}
