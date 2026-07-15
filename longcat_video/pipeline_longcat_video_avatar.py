@@ -1518,9 +1518,11 @@ class LongCatVideoAvatarPipeline:
                 num_cond_latents -= 1
 
             latents[:, :, :num_cond_latents] = cond_videos_latents
+            del cond_videos_latents
 
         self._current_timestep = None
         self._offload_to_cpu('dit')
+        self._clear_cache()
 
         if output_type == 'latent':
             return latents

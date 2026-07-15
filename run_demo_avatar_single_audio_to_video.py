@@ -360,6 +360,7 @@ def generate(args):
         all_generated_frames.extend(new_video[num_cond_frames:])
 
         current_video = new_video
+        torch_gc()
 
         if cp_rank == 0:
             output_tensor = torch.from_numpy(np.array(all_generated_frames))
