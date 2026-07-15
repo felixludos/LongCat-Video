@@ -205,6 +205,9 @@ def generate(args):
         if torch.isnan(full_audio_emb).any():
             raise ValueError(f"broken audio embedding with nan values")
 
+        pipe.audio_encoder = pipe.audio_encoder.to("cpu")
+        torch_gc()
+
         if context_parallel_util.get_cp_size() > 1:
             full_audio_emb_shape_list = list(full_audio_emb.size())
             full_audio_emb_tensor_shape_list = torch.tensor(full_audio_emb_shape_list, dtype=torch.int64, device=full_audio_emb.device)
@@ -342,7 +345,7 @@ def generate(args):
             generator=generator,
             output_type='both',
             use_kv_cache=True,
-            offload_kv_cache=False,
+            offload_kv_cache=True,
             enhance_hf=True if not use_distill else False,
             audio_emb=audio_emb,
             ref_latent=ref_latent,
@@ -362,10 +365,11 @@ def generate(args):
         current_video = new_video
         torch_gc()
 
-        if cp_rank == 0:
-            output_tensor = torch.from_numpy(np.array(all_generated_frames))
-            save_video_ffmpeg(output_tensor, os.path.join(output_dir, f"video_continue_{segment_idx+1}"), raw_speech_path, fps=save_fps, quality=5)
-            del output_tensor
+    if cp_rank == 0 and num_segments > 1:
+        output_tensor = torch.from_numpy(np.array(all_generated_frames))
+        save_video_ffmpeg(output_tensor, os.path.join(output_dir, "ai2v_demo_full"), raw_speech_path, fps=save_fps, quality=5)
+        del output_tensor
+        print(f"Saved full video ({len(all_generated_frames)} frames) to {output_dir}/ai2v_demo_full")
 
 
 def _parse_args():
