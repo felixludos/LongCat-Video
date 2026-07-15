@@ -62,7 +62,7 @@ def generate(args):
     text_guidance_scale = args.text_guidance_scale
     audio_guidance_scale = args.audio_guidance_scale
     resolution = args.resolution
-    num_segments = max(1, args.num_segments)
+    num_segments = max(0, args.num_segments)
     output_dir = args.output_dir
     model_type = args.model_type
     use_distill = args.use_distill
@@ -184,10 +184,19 @@ def generate(args):
         assert temp_vocal_path is not None and os.path.exists(temp_vocal_path), f"No vocal detected"    
 
         # audio padding to target length
-        generate_duration = num_frames / save_fps + (num_segments-1)*(num_frames-num_cond_frames) / save_fps
         speech_array, sr = librosa.load(temp_vocal_path, sr=16000)
-        source_duraion = len(speech_array) / sr
-        added_sample_nums = math.ceil((generate_duration - source_duraion) * sr)
+        source_duration = len(speech_array) / sr
+
+        if num_segments == 0:
+            frames_per_segment = num_frames - num_cond_frames
+            needed_frames = source_duration * save_fps
+            num_segments = max(1, math.ceil((needed_frames - num_frames) / frames_per_segment) + 1)
+            if local_rank == 0:
+                total_duration = num_frames / save_fps + (num_segments - 1) * frames_per_segment / save_fps
+                print(f"Auto-calculated num_segments={num_segments} to cover {source_duration:.1f}s audio (generates {total_duration:.1f}s)")
+
+        generate_duration = num_frames / save_fps + (num_segments-1)*(num_frames-num_cond_frames) / save_fps
+        added_sample_nums = math.ceil((generate_duration - source_duration) * sr)
         if added_sample_nums > 0:
             speech_array = np.append(speech_array, [0.]*added_sample_nums)
 
@@ -201,6 +210,8 @@ def generate(args):
             full_audio_emb_tensor_shape_list = torch.tensor(full_audio_emb_shape_list, dtype=torch.int64, device=full_audio_emb.device)
             context_parallel_util.cp_broadcast(full_audio_emb_tensor_shape_list)
             context_parallel_util.cp_broadcast(full_audio_emb)
+            num_segments_tensor = torch.tensor([num_segments], dtype=torch.int64, device=local_rank)
+            context_parallel_util.cp_broadcast(num_segments_tensor)
         
         if os.path.exists(temp_vocal_path):
             os.remove(temp_vocal_path)
@@ -211,6 +222,9 @@ def generate(args):
         full_audio_emb_shape_list = full_audio_emb_tensor_shape_list.tolist()
         full_audio_emb = torch.zeros(*full_audio_emb_shape_list, dtype=torch.float32, device=local_rank)
         context_parallel_util.cp_broadcast(full_audio_emb)
+        num_segments_tensor = torch.zeros(1, dtype=torch.int64, device=local_rank)
+        context_parallel_util.cp_broadcast(num_segments_tensor)
+        num_segments = num_segments_tensor.item()
 
     # prepare audio embedding for the first clip
     indices = torch.arange(2 * 2 + 1) - 2
@@ -374,7 +388,8 @@ def _parse_args():
     parser.add_argument(
         '--num_segments',
         type=int,
-        default=1
+        default=0,
+        help="Number of segments to generate (0 = auto-calculate from audio duration)"
     )
     parser.add_argument(
         '--num_inference_steps',
