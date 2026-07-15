@@ -67,6 +67,7 @@ def generate(args):
     model_type = args.model_type
     use_distill = args.use_distill
     use_int8 = args.use_int8
+    crf = args.crf
 
     if use_distill and model_type == "avatar-v1.5":
         num_inference_steps = 8
@@ -267,7 +268,7 @@ def generate(args):
 
         if cp_rank == 0:
             output_tensor = torch.from_numpy(np.array(video))
-            save_video_ffmpeg(output_tensor, os.path.join(output_dir, "at2v_demo_1"), raw_speech_path, fps=save_fps, quality=5)
+            save_video_ffmpeg(output_tensor, os.path.join(output_dir, "at2v_demo_1"), raw_speech_path, fps=save_fps, quality=5, crf=crf)
         del output
         torch_gc()
     
@@ -298,7 +299,7 @@ def generate(args):
 
         if cp_rank == 0:
             output_tensor = torch.from_numpy(np.array(video))
-            save_video_ffmpeg(output_tensor, os.path.join(output_dir, "ai2v_demo_1"), raw_speech_path, fps=save_fps, quality=5)
+            save_video_ffmpeg(output_tensor, os.path.join(output_dir, "ai2v_demo_1"), raw_speech_path, fps=save_fps, quality=5, crf=crf)
         del output
         torch_gc()
     else:
@@ -367,7 +368,7 @@ def generate(args):
 
     if cp_rank == 0 and num_segments > 1:
         output_tensor = torch.from_numpy(np.array(all_generated_frames))
-        save_video_ffmpeg(output_tensor, os.path.join(output_dir, "ai2v_demo_full"), raw_speech_path, fps=save_fps, quality=5)
+        save_video_ffmpeg(output_tensor, os.path.join(output_dir, "ai2v_demo_full"), raw_speech_path, fps=save_fps, quality=5, crf=crf)
         del output_tensor
         print(f"Saved full video ({len(all_generated_frames)} frames) to {output_dir}/ai2v_demo_full")
 
@@ -456,6 +457,12 @@ def _parse_args():
         type=int,
         default=93,
         help="Number of frames to generate (must satisfy (n-1)%%4==0, e.g. 49, 93, 137)"
+    )
+    parser.add_argument(
+        "--crf",
+        type=int,
+        default=15,
+        help="H.264 CRF value for output video (0=lossless, 15=near-lossless, 23=default, higher=worse)"
     )
 
     args = parser.parse_args()

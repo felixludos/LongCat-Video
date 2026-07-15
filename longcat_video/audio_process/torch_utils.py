@@ -162,7 +162,7 @@ def get_audio_duration(audio_path):
     return float(info["format"]["duration"])
 
 
-def save_video_ffmpeg(gen_video_samples, save_path, audio_path, fps=25, quality=5, high_quality_save=False):
+def save_video_ffmpeg(gen_video_samples, save_path, audio_path, fps=25, quality=5, high_quality_save=False, crf=15):
 
     def save_video(frames, save_path, fps, quality=9, ffmpeg_params=None):
         writer = imageio.get_writer(
@@ -190,6 +190,7 @@ def save_video_ffmpeg(gen_video_samples, save_path, audio_path, fps=25, quality=
         audio_path,
         "-t",
         f'{duration}',
+        "-ar", "44100",
         save_path_crop_audio,
     ]
     subprocess.run(final_command, check=True)
@@ -220,6 +221,8 @@ def save_video_ffmpeg(gen_video_samples, save_path, audio_path, fps=25, quality=
             "-crf", "0",
             "-preset", "veryslow", 
             "-c:a", "aac",
+            "-ar", "44100",
+            "-b:a", "192k",
             "-shortest",
             save_path,
         ]
@@ -234,8 +237,14 @@ def save_video_ffmpeg(gen_video_samples, save_path, audio_path, fps=25, quality=
             save_path_crop_audio,
             "-c:v",
             "libx264",
+            "-crf",
+            str(crf),
             "-c:a",
             "aac",
+            "-ar",
+            "44100",
+            "-b:a",
+            "192k",
             "-shortest",
             save_path,
         ]
