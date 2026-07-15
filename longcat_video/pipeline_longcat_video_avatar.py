@@ -146,6 +146,10 @@ class LongCatVideoAvatarPipeline:
             self.use_vcond = False
             self._num_distill_sample_steps = 8
 
+        self._cpu_offload = False
+        self._offload_device = None
+        self._current_gpu_model = None
+
     def _get_t5_prompt_embeds(
         self,
         prompt: Union[str, List[str]] = None,
@@ -736,6 +740,7 @@ class LongCatVideoAvatarPipeline:
 
         # 3. Encode inputs
         dit_dtype = self.dit.dtype
+        self._load_to_gpu('text_encoder')
 
         if context_parallel_util.get_cp_rank() == 0:
             (
@@ -769,6 +774,7 @@ class LongCatVideoAvatarPipeline:
                 negative_prompt_attention_mask = torch.zeros([batch_size, max_sequence_length], dtype=torch.int64, device=device)
                 context_parallel_util.cp_broadcast(negative_prompt_embeds)
                 context_parallel_util.cp_broadcast(negative_prompt_attention_mask)
+        self._offload_to_cpu('text_encoder')
 
         audio_cond_embs = torch.cat([audio_emb] * num_videos_per_prompt, dim=0)
         if self.do_classifier_free_guidance:
@@ -800,6 +806,7 @@ class LongCatVideoAvatarPipeline:
             context_parallel_util.cp_broadcast(latents)
         
         # 6. Denoising loop
+        self._load_to_gpu('dit')
         if context_parallel_util.get_cp_size() > 1:
             torch.distributed.barrier(group=context_parallel_util.get_cp_group())
 
@@ -848,6 +855,7 @@ class LongCatVideoAvatarPipeline:
                     progress_bar.update()
 
         self._current_timestep = None
+        self._offload_to_cpu('dit')
 
         if output_type == 'latent':
             return latents
@@ -855,10 +863,12 @@ class LongCatVideoAvatarPipeline:
         if output_type == 'both':
             latents_ = latents.clone()
 
+        self._load_to_gpu('vae')
         latents = latents.to(self.vae.dtype)
         latents = self.denormalize_latents(latents)
         output_video = self.vae.decode(latents, return_dict=False)[0]
         output_video = self.video_processor.postprocess_video(output_video)
+        self._offload_to_cpu('vae')
 
         if output_type == 'both':
             return (output_video, latents_)
@@ -975,6 +985,7 @@ class LongCatVideoAvatarPipeline:
 
         # 3. Encode inputs
         dit_dtype = self.dit.dtype
+        self._load_to_gpu('text_encoder')
 
         if context_parallel_util.get_cp_rank() == 0:
             (
@@ -1008,6 +1019,7 @@ class LongCatVideoAvatarPipeline:
                 negative_prompt_attention_mask = torch.zeros([batch_size, max_sequence_length], dtype=torch.int64, device=device)
                 context_parallel_util.cp_broadcast(negative_prompt_embeds)
                 context_parallel_util.cp_broadcast(negative_prompt_attention_mask)
+        self._offload_to_cpu('text_encoder')
 
         audio_cond_embs = torch.cat([audio_emb] * num_videos_per_prompt, dim=0)
         audio_num = audio_cond_embs.shape[0]
@@ -1023,6 +1035,7 @@ class LongCatVideoAvatarPipeline:
         timesteps = self.scheduler.timesteps
 
         # 5. Prepare latent variables
+        self._load_to_gpu('vae')
         image = self.video_processor.preprocess(image, height=height, width=width, resize_mode=resize_mode)
         image = image.to(device=device, dtype=prompt_embeds.dtype)
 
@@ -1043,12 +1056,14 @@ class LongCatVideoAvatarPipeline:
         )
         if context_parallel_util.get_cp_size() > 1:
             context_parallel_util.cp_broadcast(latents)
+        self._offload_to_cpu('vae')
 
         # 6. Prepare ref_target_masks to latent size
         if ref_target_masks is not None:
             ref_target_masks = self._resize_and_centercrop_tensor(ref_target_masks, height, width, resize_mode)
 
         # 7. Denoising loop
+        self._load_to_gpu('dit')
         if context_parallel_util.get_cp_size() > 1:
             torch.distributed.barrier(group=context_parallel_util.get_cp_group())
 
@@ -1130,6 +1145,7 @@ class LongCatVideoAvatarPipeline:
                     progress_bar.update()
 
         self._current_timestep = None
+        self._offload_to_cpu('dit')
 
         if output_type == 'latent':
             return latents
@@ -1137,10 +1153,12 @@ class LongCatVideoAvatarPipeline:
         if output_type == 'both':
             latents_ = latents.clone()
 
+        self._load_to_gpu('vae')
         latents = latents.to(self.vae.dtype)
         latents = self.denormalize_latents(latents)
         output_video = self.vae.decode(latents, return_dict=False)[0]
         output_video = self.video_processor.postprocess_video(output_video)
+        self._offload_to_cpu('vae')
 
         if output_type == 'both':
             return (output_video, latents_)
@@ -1277,6 +1295,7 @@ class LongCatVideoAvatarPipeline:
 
         # 3. Encode inputs
         dit_dtype = self.dit.dtype
+        self._load_to_gpu('text_encoder')
 
         if context_parallel_util.get_cp_rank() == 0:
             (
@@ -1310,6 +1329,7 @@ class LongCatVideoAvatarPipeline:
                 negative_prompt_attention_mask = torch.zeros([batch_size, max_sequence_length], dtype=torch.int64, device=device)
                 context_parallel_util.cp_broadcast(negative_prompt_embeds)
                 context_parallel_util.cp_broadcast(negative_prompt_attention_mask)
+        self._offload_to_cpu('text_encoder')
 
         audio_cond_embs = torch.cat([audio_emb] * num_videos_per_prompt, dim=0)
         audio_num = audio_cond_embs.shape[0]
@@ -1336,11 +1356,13 @@ class LongCatVideoAvatarPipeline:
             self.scheduler.sigmas = torch.cat([timesteps / 1000, torch.zeros(1, device=timesteps.device)])
 
         # 5. Prepare latent variables
+        self._load_to_gpu('vae')
         video = self.video_processor.preprocess_video(self.video_processor, video, height=height, width=width, resize_mode=resize_mode)
         video = video.to(device=device, dtype=prompt_embeds.dtype) 
         cond_videos = video[:, :, -num_cond_frames:]
         cond_videos_latents = retrieve_latents(self.vae.encode(cond_videos), generator, sample_mode="argmax")
         cond_videos_latents = self.normalize_latents(cond_videos_latents)
+        self._offload_to_cpu('vae')
 
 
         num_channels_latents = self.dit.config.in_channels
@@ -1377,6 +1399,7 @@ class LongCatVideoAvatarPipeline:
             latents = torch.cat([ref_latent, latents], dim=2)
 
         # 8. Denoising loop
+        self._load_to_gpu('dit')
         if context_parallel_util.get_cp_size() > 1:
             torch.distributed.barrier(group=context_parallel_util.get_cp_group())
 
@@ -1497,6 +1520,7 @@ class LongCatVideoAvatarPipeline:
             latents[:, :, :num_cond_latents] = cond_videos_latents
 
         self._current_timestep = None
+        self._offload_to_cpu('dit')
 
         if output_type == 'latent':
             return latents
@@ -1504,10 +1528,12 @@ class LongCatVideoAvatarPipeline:
         if output_type == 'both':
             latents_ = latents.clone()
 
+        self._load_to_gpu('vae')
         latents = latents.to(self.vae.dtype)
         latents = self.denormalize_latents(latents)
         output_video = self.vae.decode(latents, return_dict=False)[0]
         output_video = self.video_processor.postprocess_video(output_video)
+        self._offload_to_cpu('vae')
 
         if output_type == 'both':
             return (output_video, latents_)
@@ -1517,9 +1543,63 @@ class LongCatVideoAvatarPipeline:
 
     
 
+    def enable_model_cpu_offload(self, device: int = 0):
+        """
+        Enable sequential CPU offloading: only one model on GPU at a time.
+
+        Models are moved to GPU on-demand before their use phase, and
+        offloaded back to CPU afterwards to free VRAM.
+
+        Args:
+            device: GPU device index to use.
+        """
+        self._cpu_offload = True
+        self._offload_device = torch.device(f"cuda:{device}")
+        self._current_gpu_model = None
+
+    def _load_to_gpu(self, model_name: str):
+        """Move a model to GPU, offloading the previously-used model first."""
+        if not self._cpu_offload:
+            return
+        model = getattr(self, model_name, None)
+        if model is None:
+            return
+        if self._current_gpu_model == model_name:
+            return
+        if self._current_gpu_model is not None:
+            self._offload_to_cpu(self._current_gpu_model)
+        setattr(self, model_name, model.to(self._offload_device, non_blocking=True))
+        if model_name == 'dit':
+            if hasattr(self.dit, 'lora_dict') and self.dit.lora_dict:
+                for lora_network in self.dit.lora_dict.values():
+                    for lora in lora_network.loras:
+                        lora.to(self._offload_device, non_blocking=True)
+        self._current_gpu_model = model_name
+        torch.cuda.empty_cache()
+
+    def _offload_to_cpu(self, model_name: str):
+        """Move a model to CPU to free GPU memory."""
+        if not self._cpu_offload:
+            return
+        model = getattr(self, model_name, None)
+        if model is None:
+            return
+        setattr(self, model_name, model.to("cpu", non_blocking=True))
+        if model_name == 'dit':
+            if hasattr(self.dit, 'lora_dict') and self.dit.lora_dict:
+                for lora_network in self.dit.lora_dict.values():
+                    for lora in lora_network.loras:
+                        lora.to("cpu", non_blocking=True)
+        if self._current_gpu_model == model_name:
+            self._current_gpu_model = None
+        torch.cuda.empty_cache()
+
     def to(self, device: str | torch.device):
         """
         Move pipeline to specified device.
+
+        When CPU offloading is enabled, this only sets the logical device
+        without moving models (they are moved on-demand during inference).
 
         Args:
             device: Target device string
@@ -1528,6 +1608,8 @@ class LongCatVideoAvatarPipeline:
             Self
         """
         self.device = device
+        if self._cpu_offload:
+            return self
         if self.dit is not None:
             self.dit = self.dit.to(device, non_blocking=True)
             if hasattr(self.dit, 'lora_dict') and self.dit.lora_dict:

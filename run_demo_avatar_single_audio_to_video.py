@@ -79,7 +79,7 @@ def generate(args):
     if model_type == "avatar-v1.5":
         save_fps = 25
         audio_stride = 1
-    num_frames = 93
+    num_frames = args.num_frames
     num_cond_frames = 13
 
     if resolution == '480p':
@@ -169,7 +169,8 @@ def generate(args):
         audio_feature_extractor=audio_feature_extractor,
         model_type=model_type
     )
-    pipe.to(local_rank)
+    pipe.enable_model_cpu_offload(local_rank)
+    pipe.device = torch.device(local_rank)
 
     global_seed = 42
     seed = global_seed + global_rank
@@ -429,6 +430,12 @@ def _parse_args():
         "--use_int8",
         action='store_true',
         help="Load INT8 quantized DiT model for reduced VRAM usage"
+    )
+    parser.add_argument(
+        "--num_frames",
+        type=int,
+        default=93,
+        help="Number of frames to generate (must satisfy (n-1)%%4==0, e.g. 49, 93, 137)"
     )
 
     args = parser.parse_args()
